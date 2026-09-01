@@ -1,0 +1,46 @@
+name: Build ESP32 Firmware
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build firmware
+        run: pio run
+
+      - name: Collect firmware files
+        run: |
+          mkdir -p firmware
+
+          cp .pio/build/esp32doit-devkit-v1/firmware.bin firmware/
+          cp .pio/build/esp32doit-devkit-v1/bootloader.bin firmware/
+          cp .pio/build/esp32doit-devkit-v1/partitions.bin firmware/
+
+          BOOT_APP0=$(find ~/.platformio/packages -name boot_app0.bin | head -n 1)
+
+          if [ -n "$BOOT_APP0" ]; then
+            cp "$BOOT_APP0" firmware/
+          fi
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: gps-tracker-firmware
+          path: firmware/
