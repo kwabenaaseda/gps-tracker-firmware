@@ -18,6 +18,8 @@ const char* DEVICE_ID = "esp32-01";
 const unsigned long POST_INTERVAL_MS = 5000;
 const unsigned long WIFI_CONNECT_TIMEOUT_MS = 15000;
 
+String rawGPS = "";
+unsigned long lastGPSByte = 0;
 unsigned long lastPost = 0;
 unsigned long lastStatus = 0;
 
@@ -317,6 +319,20 @@ void handleStatus() {
       "s ago)</p>";
 
 
+      html += "<h3>GPS Diagnostic</h3>";
+html += "<p><b>Last GPS byte:</b> ";
+
+if (lastGPSByte == 0) {
+  html += "NONE";
+} else {
+  html += String((millis() - lastGPSByte) / 1000) + " seconds ago";
+}
+
+html += "</p>";
+html += "<p><b>Raw NMEA:</b></p><pre>";
+html += htmlEscape(rawGPS);
+html += "</pre>";
+
   html += "<h3>Recent log</h3><pre>";
 
 
@@ -596,14 +612,23 @@ void loop() {
 
   // Read GPS UART
   while (GPS_Serial.available()) {
+  char c = GPS_Serial.read();
 
-    char c =
-        GPS_Serial.read();
+  gps.encode(c);
+  receivedGPSData = true;
+  lastGPSByte = millis();
 
-    gps.encode(c);
-
-    receivedGPSData = true;
+  // Keep the most recent NMEA sentence
+  if (c == '\n') {
+    Serial.print("GPS RAW: ");
+    Serial.print(rawGPS);
+    rawGPS = "";
+  } else if (c != '\r') {
+    if (rawGPS.length() < 150) {
+      rawGPS += c;
+    }
   }
+}
 
 
   // GPS has a valid location
