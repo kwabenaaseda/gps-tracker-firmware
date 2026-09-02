@@ -45,41 +45,84 @@ void addLog(String msg) {
   Serial.println(msg);
 }
 
+// Escapes text for safe placement inside HTML content AND inside a
+// double-quoted HTML attribute. Order matters: escape "&" first, since
+// the other replacements introduce "&" sequences that must not be
+// re-escaped.
+String htmlEscape(String s) {
+  s.replace("&", "&amp;");
+  s.replace("\"", "&quot;");
+  s.replace("'", "&#39;");
+  s.replace("<", "&lt;");
+  s.replace(">", "&gt;");
+  return s;
+}
+
 // ---------------------------------------------------------------------
-// PROVISIONING MODE — scan + form
+// PROVISIONING MODE — typeable SSID (primary) + scan results (fallback)
 // ---------------------------------------------------------------------
 
 void handleRoot() {
   String html = "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width, initial-scale=1'>"
                  "<title>GPS Tracker Setup</title>"
                  "<style>body{font-family:sans-serif;max-width:340px;margin:40px auto;padding:0 16px}"
-                 "select,input{width:100%;padding:8px;margin:6px 0 14px;box-sizing:border-box}"
-                 "button{width:100%;padding:10px;background:#4C5FD5;color:#fff;border:none;border-radius:6px}"
+                 "input{width:100%;padding:8px;margin:6px 0 14px;box-sizing:border-box}"
+                 "button.submit{width:100%;padding:10px;background:#4C5FD5;color:#fff;border:none;border-radius:6px}"
                  ".warn{background:#fdecea;color:#a33;padding:10px;border-radius:6px;margin-bottom:14px}"
-                 ".link{display:block;text-align:center;margin-top:10px;font-size:13px}</style></head><body>";
+                 ".scan-box{margin-top:24px;padding-top:16px;border-top:1px solid #ddd}"
+                 ".net-btn{display:block;width:100%;text-align:left;padding:8px;margin:4px 0;"
+                 "background:#f2f2f2;border:1px solid #ddd;border-radius:6px;font-size:13px;cursor:pointer}"
+                 ".link{display:block;text-align:center;margin-top:10px;font-size:13px}</style>"
+                 "</head><body>";
 
   html += "<h2>GPS Tracker WiFi Setup</h2>";
 
   if (lastConnectFailed) {
-    html += "<div class='warn'>Couldn't connect to <b>" + lastAttemptedSSID +
+    html += "<div class='warn'>Couldn't connect to <b>" + htmlEscape(lastAttemptedSSID) +
             "</b>. Check the password and try again.</div>";
   }
 
-  html += "<form action='/save' method='POST'><label>Network</label><select name='ssid'>";
+  // --- primary path: type it in directly, always available regardless of scan ---
+  html += "<form action='/save' method='POST'>";
+  html += "<label>Network name (SSID)</label>";
+  html += "<input id='ssid' name='ssid' required autocomplete='off'>";
+  html += "<label>Password</label>";
+  html += "<input name='password' type='password'>";
+  html += "<button class='submit' type='submit'>Save & Connect</button>";
+  html += "</form>";
+
+  // --- fallback/assist: scan results, tap to fill the field above ---
+  html += "<div class='scan-box'><p><b>Detected networks</b> (tap to fill in the field above):</p>";
 
   int n = WiFi.scanNetworks();
-  if (n == 0) {
-    html += "<option value=''>No networks found — rescan?</option>";
+  Serial.print("scanNetworks returned: ");
+  Serial.println(n);
+
+  if (n < 0) {
+    html += "<p style='color:#888;font-size:13px'>Scan error (code " + String(n) +
+            "). You can still type your network name above manually.</p>";
+  } else if (n == 0) {
+    html += "<p style='color:#888;font-size:13px'>No networks detected. You can still type yours above manually.</p>";
   } else {
     for (int i = 0; i < n; i++) {
-      html += "<option value='" + WiFi.SSID(i) + "'>" + WiFi.SSID(i) +
-              " (" + String(WiFi.RSSI(i)) + " dBm)</option>";
+      String safeSsid = htmlEscape(WiFi.SSID(i));
+      html += "<button type='button' class='net-btn' data-ssid=\"" + safeSsid + "\">" +
+              safeSsid + " (" + String(WiFi.RSSI(i)) + " dBm)</button>";
     }
   }
-  html += "</select>";
-  html += "<label>Password</label><input name='password' type='password'>";
-  html += "<button type='submit'>Save & Connect</button></form>";
-  html += "<a class='link' href='/'>Rescan networks</a>";
+  html += "</div>";
+  html += "<a class='link' href='/'>Rescan</a>";
+
+  // Data-attribute + addEventListener: the SSID is only ever read as inert
+  // attribute data here, never assembled into a JavaScript source string,
+  // so there is no quote/backslash escaping needed for JS at all.
+  html += "<script>"
+          "document.querySelectorAll('.net-btn').forEach(function(btn){"
+          "btn.addEventListener('click', function(){"
+          "document.getElementById('ssid').value = btn.getAttribute('data-ssid');"
+          "});});"
+          "</script>";
+
   html += "</body></html>";
 
   server.send(200, "text/html", html);
@@ -106,6 +149,8 @@ void startProvisioning() {
 
   WiFi.mode(WIFI_AP_STA);  // AP for the setup page, STA half free to scan
   WiFi.softAP("GPS-Tracker-Setup");
+  delay(500);  // let the radio settle into dual AP+STA mode before scanning
+
   Serial.print("PROVISIONING. Browse to: ");
   Serial.println(WiFi.softAPIP());
 
@@ -124,7 +169,7 @@ void handleStatus() {
                  "pre{background:#f0f0f0;padding:10px;border-radius:6px;font-size:13px}"
                  "a.reset{display:inline-block;margin-top:10px;color:#a33}</style></head><body>";
   html += "<h2>GPS Tracker Status</h2>";
-  html += "<p><b>Network:</b> " + WiFi.SSID() + " (" + WiFi.localIP().toString() + ")</p>";
+  html += "<p><b>Network:</b> " + htmlEscape(WiFi.SSID()) + " (" + WiFi.localIP().toString() + ")</p>";
   html += "<p><b>Last fix:</b> " + String(lastLat, 6) + ", " + String(lastLng, 6) + "</p>";
   html += "<p><b>Satellites:</b> " + String(lastSatCount) + "</p>";
   html += "<p><b>Last POST result:</b> " + String(lastPostCode) +
@@ -132,7 +177,7 @@ void handleStatus() {
   html += "<h3>Recent log</h3><pre>";
   for (int i = 0; i < LOG_SIZE; i++) {
     int idx = (logIndex + i) % LOG_SIZE;
-    if (logBuffer[idx].length() > 0) html += logBuffer[idx] + "\n";
+    if (logBuffer[idx].length() > 0) html += htmlEscape(logBuffer[idx]) + "\n";
   }
   html += "</pre>";
   html += "<a class='reset' href='/reset'>Forget WiFi & re-provision</a>";
@@ -180,7 +225,7 @@ bool connectWithSavedCredentials() {
 void postLocation(double lat, double lng) {
   if (WiFi.status() != WL_CONNECTED) return;
   WiFiClientSecure client;
-  client.setInsecure();
+  client.setInsecure();  // prototype-only; see notes on TLS trust
   HTTPClient http;
   http.begin(client, API_URL);
   http.addHeader("Content-Type", "application/json");
